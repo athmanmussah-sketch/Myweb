@@ -1,181 +1,208 @@
 from flask import Flask, render_template, request, jsonify, send_file
-import yt_dlp
 import os
-import threading
-import uuid
-import shutil
+import json
+import random
+import string
+import hashlib
 from datetime import datetime
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'darkx-video-downloader-secret'
+app.config['SECRET_KEY'] = 'darkx-web-tools-secret'
 
-# Folda za kuhifadhi faili
-DOWNLOAD_FOLDER = 'downloads'
-if not os.path.exists(DOWNLOAD_FOLDER):
-    os.makedirs(DOWNLOAD_FOLDER)
-
-# Kuhifadhi progress za downloads
-download_progress = {}
-
-def progress_hook(d):
-    if d['status'] == 'downloading':
-        download_id = d['info_dict']['_download_id']
-        if 'total_bytes' in d:
-            total = d['total_bytes']
-            downloaded = d['downloaded_bytes']
-            percent = (downloaded / total) * 100
-        elif 'total_bytes_estimate' in d:
-            total = d['total_bytes_estimate']
-            downloaded = d['downloaded_bytes']
-            percent = (downloaded / total) * 100
-        else:
-            percent = 0
-        
-        download_progress[download_id] = {
-            'percent': round(percent, 1),
-            'speed': d.get('speed', 0),
-            'eta': d.get('eta', 0),
-            'status': 'downloading'
-        }
-    elif d['status'] == 'finished':
-        download_id = d['info_dict']['_download_id']
-        download_progress[download_id] = {
-            'percent': 100,
-            'status': 'finished',
-            'filename': d['filename']
-        }
-
-def download_video(url, quality, format_type, download_id):
-    ydl_opts = {
-        'outtmpl': f'{DOWNLOAD_FOLDER}/%(title)s.%(ext)s',
-        'progress_hooks': [progress_hook],
-        'quiet': True,
-        'no_warnings': True,
-        '_download_id': download_id
-    }
-    
-    if format_type == 'mp3':
-        ydl_opts.update({
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'embedthumbnail': True,
-            'addmetadata': True,
-        })
-    else:
-        if quality == '2160p':
-            format_spec = 'bestvideo[height<=2160]+bestaudio/best[height<=2160]'
-        elif quality == '1080p':
-            format_spec = 'bestvideo[height<=1080]+bestaudio/best[height<=1080]'
-        elif quality == '720p':
-            format_spec = 'bestvideo[height<=720]+bestaudio/best[height<=720]'
-        elif quality == '480p':
-            format_spec = 'bestvideo[height<=480]+bestaudio/best[height<=480]'
-        else:
-            format_spec = 'best'
-        
-        ydl_opts.update({
-            'format': format_spec,
-            'merge_output_format': format_type,
-        })
-    
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-            
-            # Adjust filename for MP3
-            if format_type == 'mp3':
-                filename = filename.rsplit('.', 1)[0] + '.mp3'
-            
-            download_progress[download_id]['filename'] = filename
-            download_progress[download_id]['status'] = 'completed'
-            
-    except Exception as e:
-        download_progress[download_id] = {
-            'status': 'error',
-            'error': str(e)
-        }
-
+# Home page
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/api/info', methods=['POST'])
-def get_info():
-    url = request.json.get('url')
+# ============================================
+# TOOL 1: QR CODE GENERATOR (Inafanya kazi 100%)
+# ============================================
+@app.route('/api/qr', methods=['POST'])
+def generate_qr():
+    data = request.json.get('data', 'DarkX Dev')
+    import qrcode
+    from io import BytesIO
+    import base64
     
-    try:
-        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
-            info = ydl.extract_info(url, download=False)
-            
-            return jsonify({
-                'success': True,
-                'title': info.get('title', 'Unknown'),
-                'duration': info.get('duration', 0),
-                'uploader': info.get('uploader', 'Unknown'),
-                'thumbnail': info.get('thumbnail', ''),
-                'formats': [
-                    {
-                        'format_id': f.get('format_id'),
-                        'quality': f.get('height', 'Audio') if f.get('height') else 'Audio',
-                        'ext': f.get('ext', '')
-                    }
-                    for f in info.get('formats', [])
-                    if f.get('height') or f.get('acodec') != 'none'
-                ][:10]
-            })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+    img = qrcode.make(data)
+    buffered = BytesIO()
+    img.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    
+    return jsonify({'qr': f'data:image/png;base64,{img_str}'})
 
-@app.route('/api/download', methods=['POST'])
-def start_download():
-    url = request.json.get('url')
-    quality = request.json.get('quality', '720p')
-    format_type = request.json.get('format', 'mp4')
+# ============================================
+# TOOL 2: PASSWORD GENERATOR
+# ============================================
+@app.route('/api/password', methods=['GET'])
+def generate_password():
+    length = int(request.args.get('length', 12))
+    chars = string.ascii_letters + string.digits + "!@#$%^&*"
+    password = ''.join(random.choice(chars) for _ in range(length))
+    return jsonify({'password': password})
+
+# ============================================
+# TOOL 3: TEXT ENCRYPT/DECRYPT
+# ============================================
+@app.route('/api/encrypt', methods=['POST'])
+def encrypt_text():
+    text = request.json.get('text', '')
+    # Simple Caesar cipher
+    shift = 3
+    result = ""
+    for char in text:
+        if char.isupper():
+            result += chr((ord(char) + shift - 65) % 26 + 65)
+        elif char.islower():
+            result += chr((ord(char) + shift - 97) % 26 + 97)
+        else:
+            result += char
+    return jsonify({'result': result})
+
+@app.route('/api/decrypt', methods=['POST'])
+def decrypt_text():
+    text = request.json.get('text', '')
+    # Reverse Caesar cipher
+    shift = -3
+    result = ""
+    for char in text:
+        if char.isupper():
+            result += chr((ord(char) + shift - 65) % 26 + 65)
+        elif char.islower():
+            result += chr((ord(char) + shift - 97) % 26 + 97)
+        else:
+            result += char
+    return jsonify({'result': result})
+
+# ============================================
+# TOOL 4: FILE CONVERTER (TEXT TO PDF)
+# ============================================
+@app.route('/api/txt-to-pdf', methods=['POST'])
+def txt_to_pdf():
+    from fpdf import FPDF
+    import tempfile
     
-    download_id = str(uuid.uuid4())
+    text = request.json.get('text', '')
     
-    download_progress[download_id] = {
-        'status': 'starting',
-        'percent': 0
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    
+    # Split text into lines
+    lines = text.split('\n')
+    for line in lines:
+        pdf.cell(200, 10, txt=line[:50], ln=True)
+    
+    # Save to temp file
+    temp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+    pdf.output(temp.name)
+    
+    return send_file(temp.name, as_attachment=True, download_name='document.pdf')
+
+# ============================================
+# TOOL 5: UNIT CONVERTER
+# ============================================
+@app.route('/api/convert', methods=['POST'])
+def convert_units():
+    value = float(request.json.get('value', 0))
+    from_unit = request.json.get('from', 'cm')
+    to_unit = request.json.get('to', 'm')
+    
+    conversions = {
+        'cm_to_m': value / 100,
+        'm_to_cm': value * 100,
+        'kg_to_g': value * 1000,
+        'g_to_kg': value / 1000,
+        'c_to_f': (value * 9/5) + 32,
+        'f_to_c': (value - 32) * 5/9,
     }
     
-    thread = threading.Thread(
-        target=download_video,
-        args=(url, quality, format_type, download_id)
-    )
-    thread.daemon = True
-    thread.start()
+    key = f"{from_unit}_to_{to_unit}"
+    result = conversions.get(key, value)
     
-    return jsonify({'download_id': download_id})
+    return jsonify({'result': round(result, 2)})
 
-@app.route('/api/progress/<download_id>')
-def get_progress(download_id):
-    if download_id in download_progress:
-        return jsonify(download_progress[download_id])
-    return jsonify({'status': 'not_found'})
+# ============================================
+# TOOL 6: AGE CALCULATOR
+# ============================================
+@app.route('/api/age', methods=['POST'])
+def calculate_age():
+    birth_year = int(request.json.get('year', 2000))
+    birth_month = int(request.json.get('month', 1))
+    birth_day = int(request.json.get('day', 1))
+    
+    today = datetime.now()
+    birth_date = datetime(birth_year, birth_month, birth_day)
+    
+    age = today.year - birth_date.year
+    if today.month < birth_date.month or (today.month == birth_date.month and today.day < birth_date.day):
+        age -= 1
+    
+    return jsonify({'age': age})
 
-@app.route('/api/download-file/<path:filename>')
-def download_file(filename):
-    return send_file(
-        os.path.join(DOWNLOAD_FOLDER, filename),
-        as_attachment=True,
-        download_name=filename
-    )
+# ============================================
+# TOOL 7: RANDOM COLOR GENERATOR
+# ============================================
+@app.route('/api/color', methods=['GET'])
+def random_color():
+    color = '#' + ''.join(random.choices('0123456789ABCDEF', k=6))
+    return jsonify({'color': color})
 
-@app.route('/api/cleanup', methods=['POST'])
-def cleanup():
-    """Cleanup old files after download"""
-    try:
-        shutil.rmtree(DOWNLOAD_FOLDER)
-        os.makedirs(DOWNLOAD_FOLDER)
-        return jsonify({'success': True})
-    except:
-        return jsonify({'success': False})
+# ============================================
+# TOOL 8: BMI CALCULATOR
+# ============================================
+@app.route('/api/bmi', methods=['POST'])
+def calculate_bmi():
+    weight = float(request.json.get('weight', 70))  # kg
+    height = float(request.json.get('height', 170)) / 100  # cm to m
+    
+    bmi = weight / (height * height)
+    
+    if bmi < 18.5:
+        category = "Underweight"
+    elif bmi < 25:
+        category = "Normal weight"
+    elif bmi < 30:
+        category = "Overweight"
+    else:
+        category = "Obese"
+    
+    return jsonify({
+        'bmi': round(bmi, 1),
+        'category': category
+    })
+
+# ============================================
+# TOOL 9: LOAN CALCULATOR
+# ============================================
+@app.route('/api/loan', methods=['POST'])
+def calculate_loan():
+    amount = float(request.json.get('amount', 1000000))
+    rate = float(request.json.get('rate', 10)) / 100 / 12
+    years = int(request.json.get('years', 1))
+    months = years * 12
+    
+    monthly = (amount * rate * (1 + rate)**months) / ((1 + rate)**months - 1)
+    total = monthly * months
+    
+    return jsonify({
+        'monthly': round(monthly, 2),
+        'total': round(total, 2)
+    })
+
+# ============================================
+# TOOL 10: TEXT COUNTER
+# ============================================
+@app.route('/api/count', methods=['POST'])
+def count_text():
+    text = request.json.get('text', '')
+    
+    return jsonify({
+        'characters': len(text),
+        'words': len(text.split()),
+        'lines': len(text.split('\n')),
+        'spaces': text.count(' ')
+    })
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000, debug=True)
